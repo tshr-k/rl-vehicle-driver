@@ -1,0 +1,7 @@
+gymnasium==1.2.1
+numpy==2.4.2
+pandas==3.0.1
+pygame==2.6.1
+scipy==1.17.0
+Shapely==2.1.2
+stable_baselines3==2.7.1
