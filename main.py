@@ -10,7 +10,7 @@ TRACK_CSV_PATH = "data/tracks/MexicoCity.csv"
 NUM_RANGEFINDERS = 20
 NUM_FUTURE_CURVATURES = 20
 COLLISION_PENALTY = 5
-TIME_PENALTY = 0.01
+SLOWNESS_PENALTY = 0.01
 
 # Register and create base environment
 gym.register(
@@ -27,7 +27,7 @@ env_train = gym.make(
     num_rangefinders=NUM_RANGEFINDERS,
     num_future_curvatures=NUM_FUTURE_CURVATURES,
     collision_penalty=COLLISION_PENALTY,
-    time_penalty=TIME_PENALTY,
+    slowness_penalty=SLOWNESS_PENALTY,
     car_model=car_model,
     follow_car=True,
 )
