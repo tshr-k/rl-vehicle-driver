@@ -3,14 +3,19 @@ from stable_baselines3 import PPO
 from stable_baselines3.common.vec_env import VecNormalize
 
 from environment.car_model import KinematicBicycleModel
-
+from environment.lts_env import RewardCoefficients
 
 # Define environment parameters
 TRACK_CSV_PATH = "data/tracks/MexicoCity.csv"
 NUM_RANGEFINDERS = 20
 NUM_FUTURE_CURVATURES = 20
-COLLISION_PENALTY = 5
-SLOWNESS_PENALTY = 0.01
+
+REWARD_COEFFICIENTS = RewardCoefficients(
+    progress=+5.0,
+    parallel_velocity=0.1,
+    survival=+0.1,
+    collision=-100.0,
+)
 
 # Register and create base environment
 gym.register(
@@ -26,8 +31,7 @@ env_train = gym.make(
     track_csv_path=TRACK_CSV_PATH,
     num_rangefinders=NUM_RANGEFINDERS,
     num_future_curvatures=NUM_FUTURE_CURVATURES,
-    collision_penalty=COLLISION_PENALTY,
-    slowness_penalty=SLOWNESS_PENALTY,
+    reward_coefficients=REWARD_COEFFICIENTS,
     car_model=car_model,
     follow_car=True,
 )

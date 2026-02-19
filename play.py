@@ -31,7 +31,7 @@ env.render()
 
 # Control senstivity
 THROTTLE_SENSITIVITY = 0.15
-STEERING_SENSITIVITY = 0.1
+STEERING_SENSITIVITY = 0.03
 
 # Decay factors for when keys are released
 THROTTLE_DECAY = 0.95

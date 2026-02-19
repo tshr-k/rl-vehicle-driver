@@ -1,5 +1,6 @@
 from typing import Dict, List, Tuple, TypedDict
 
+from dataclasses import dataclass
 import gymnasium as gym
 import numpy as np
 import pygame
@@ -20,6 +21,14 @@ class _LtsObservation(TypedDict):
     ranges: NDArray[np.float32]
     future_curvatures: NDArray[np.float32]
 
+@dataclass
+class RewardCoefficients:
+    """Penalties must be negative since they will be added to the reward"""
+    progress: float
+    parallel_velocity: float
+    survival: float
+    collision: float
+
 
 class LtsEnv(gym.Env):
     metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 30, "name": "LtsEnv-v0"}
@@ -30,8 +39,7 @@ class LtsEnv(gym.Env):
         num_rangefinders: int,
         num_future_curvatures: int,
         car_model: CarModel,
-        collision_penalty: float = 5.0,
-        slowness_penalty: float = 0.01,
+        reward_coefficients: RewardCoefficients | None = None,
         max_range: float = 100.0,
         render_mode: str | None = None,
         follow_car: bool = True,
@@ -39,15 +47,21 @@ class LtsEnv(gym.Env):
         super().__init__()
 
         self._car_model = car_model
-        self._last_action = np.array([0.0, 0.0])  # [throttle, steering]
+        self._latest_action = np.array([0.0, 0.0])  # [throttle, steering]
 
-        # Initialise lap progress and tunable collision penalty
+        # Initialise lap progress
         self._progress = 0.0  # Fraction of the track completed, from 0 to 1
         self._previous_progress = 0.0  # For reward calculation
 
-        # Ensure penalties are positive since they will be subtracted from the reward
-        self._collision_penalty = abs(collision_penalty)
-        self._slowness_penalty = abs(slowness_penalty)
+        # Store reward coefficients, using default values if not provided
+        if reward_coefficients is None:
+            reward_coefficients = RewardCoefficients(
+                progress=5.0,
+                parallel_velocity=1.0,
+                survival=+0.01,
+                collision=-100.0,
+            )
+        self._rcs = reward_coefficients
 
         # Initialise track geometry
         track_df = load_track(track_csv_path)
@@ -181,7 +195,7 @@ class LtsEnv(gym.Env):
     def _draw_action_bars(self, canvas: pygame.Surface, color=Colors.DARK_GRAY, bar_width=10):
         half_screen = self._screen_size / 2
 
-        throttle, steering = self._last_action
+        throttle, steering = self._latest_action
         throttle_length = int(half_screen * np.abs(throttle))
         steering_length = int(half_screen * np.abs(steering))
 
@@ -391,38 +405,58 @@ class LtsEnv(gym.Env):
         info = self._get_info()
         return observation, info
 
+    def _calculate_reward(self, action: NDArray, obs: _LtsObservation, is_colliding: bool) -> float:
+        reward = 0.0
+        
+        # Reward increase in progress along the centreline
+        reward += self._rcs.progress * (self._progress - self._previous_progress)
+        self._previous_progress = self._progress
+
+
+        # Reward velocity component in the direction of the track
+        speed = vec_norm(self._state.velocity)
+        parallel_velocity = speed * obs["kinematic_state"][4] # cos(angle_to_track)
+        reward += self._rcs.parallel_velocity * parallel_velocity
+
+        # Reward survival
+        if self._state.velocity[0] < 0.1:
+            reward += self._rcs.survival
+        
+        # Penalise collisions
+        if is_colliding:
+            reward += self._rcs.collision
+
+        return reward
+
     def step(self, action: NDArray):
+        # Update the car's state based on the action using the car model
         self._state = self._car_model.step(
             self._state, throttle=action[0], steering=action[1], dt=1 / self.metadata["render_fps"]
         )
+        
+        # Update the latest observation after stepping the car
+        obs = self._get_obs()
 
         # Update the car shape for collision detection and rendering
         self._car_shape = shapely.Point(self._state.position)
         self._update_progress()
-        self._last_action = action
-        
-        if self.render_mode == "human":
-            self.render()
-
+        self._latest_action = action  # For rendering the action bars
+                
         # Check for collisions
         is_colliding = not self._track.contains(self._car_shape)
 
-        # Reward progress increase
-        reward = self._progress - self._previous_progress
-        self._previous_progress = self._progress
-
-        # Penalise collisions proportional to kinetic energy
-        if is_colliding:
-            reward -= self._collision_penalty * vec_norm(self._state.velocity) ** 2
+        # Render the environment
+        if self.render_mode == "human":
+            self.render()
         
-        # Time step penalty to encourage faster completion
-        if self._state.velocity[0] < 0.1:
-            reward -= self._slowness_penalty
+        # Calculate reward
+        reward = self._calculate_reward(action, obs, is_colliding)
 
-        # Terminate if the car has completed the track or gone off-track.
+        # Terminate if the car has completed the track or gone off-track
         terminated = (self._progress >= 0.99) or is_colliding
         
-        # No explicit truncation here, but a wrapper could be used externally if desired.
+        # No explicit truncation here, but a wrapper could be used externally if desired
         truncated = False
 
-        return self._get_obs(), reward, terminated, truncated, self._get_info()
+
+        return obs, reward, terminated, truncated, self._get_info()
