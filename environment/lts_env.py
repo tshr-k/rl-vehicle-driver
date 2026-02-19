@@ -30,6 +30,13 @@ class RewardCoefficients:
     collision: float
 
 
+@dataclass
+class ResetOptions:
+    """Options for resetting the LTS environment"""
+    randomize_start: bool = False  # Whether to randomize the starting position along the track
+    randomize_track: bool = False  # Whether to randomize the track (if multiple tracks are available)
+
+
 class LtsEnv(gym.Env):
     metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 30, "name": "LtsEnv-v0"}
 
@@ -75,6 +82,7 @@ class LtsEnv(gym.Env):
         outer_boundary = shapely.offset_curve(self._centreline, abs(track_df["w_left"]))[0]
         inner_boundary = shapely.offset_curve(self._centreline, -abs(track_df["w_right"]))[0]
         self._track = shapely.Polygon(outer_boundary, holes=[inner_boundary])
+        shapely.prepare(self._track)  # For faster collision detection
 
         self._curvatures = calculate_curvature(self._closed_centreline, clip_threshold=1.0)
 
@@ -385,7 +393,7 @@ class LtsEnv(gym.Env):
         }
 
     def reset(
-        self, seed: int | None = None, options: dict | None = None
+        self, seed: int | None = None, options: ResetOptions | None = None
     ) -> Tuple[_LtsObservation, Dict]:
         super().reset(seed=seed)
 
@@ -452,7 +460,7 @@ class LtsEnv(gym.Env):
         # Calculate reward
         reward = self._calculate_reward(action, obs, is_colliding)
 
-        # Terminate if the car has completed the track or gone off-track
+        # Terminate if the car has completed a lap or gone off-track
         terminated = (self._progress >= 0.99) or is_colliding
         
         # No explicit truncation here, but a wrapper could be used externally if desired
