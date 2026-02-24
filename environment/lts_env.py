@@ -1,11 +1,12 @@
+from dataclasses import dataclass
 from typing import Dict, List, Tuple, TypedDict
 
-from dataclasses import dataclass
 import gymnasium as gym
 import numpy as np
 import pygame
 import shapely
 from numpy.typing import NDArray
+from scipy.interpolate import interp1d
 from shapely.coords import CoordinateSequence
 
 from environment.car_model import CarModel
@@ -21,9 +22,11 @@ class _LtsObservation(TypedDict):
     ranges: NDArray[np.float32]
     future_curvatures: NDArray[np.float32]
 
+
 @dataclass
 class RewardCoefficients:
     """Penalties must be negative since they will be added to the reward"""
+
     progress: float
     parallel_velocity: float
     survival: float
@@ -33,8 +36,11 @@ class RewardCoefficients:
 @dataclass
 class ResetOptions:
     """Options for resetting the LTS environment"""
+
     randomize_start: bool = False  # Whether to randomize the starting position along the track
-    randomize_track: bool = False  # Whether to randomize the track (if multiple tracks are available)
+    randomize_track: bool = (
+        False  # Whether to randomize the track (if multiple tracks are available)
+    )
 
 
 class LtsEnv(gym.Env):
@@ -46,6 +52,7 @@ class LtsEnv(gym.Env):
         num_rangefinders: int,
         num_future_curvatures: int,
         car_model: CarModel,
+        dt: float = 1 / metadata["render_fps"],  # Use the render FPS by default
         reward_coefficients: RewardCoefficients | None = None,
         max_range: float = 100.0,
         render_mode: str | None = None,
@@ -54,7 +61,7 @@ class LtsEnv(gym.Env):
         super().__init__()
 
         self._car_model = car_model
-        self._latest_action = np.array([0.0, 0.0])  # [throttle, steering]
+        self._dt = dt  # Physical simulation timestep in seconds
 
         # Initialise lap progress
         self._progress = 0.0  # Fraction of the track completed, from 0 to 1
@@ -73,7 +80,19 @@ class LtsEnv(gym.Env):
         # Initialise track geometry
         track_df = load_track(track_csv_path)
 
-        self._centreline = shapely.LineString(track_df[["x_centreline", "y_centreline"]].to_numpy())
+        # Precompute track angles using central differences
+        x_c = track_df["x_centreline"]
+        y_c = track_df["y_centreline"]
+        track_angles = np.arctan2(
+            np.roll(y_c, -1) - np.roll(y_c, 1), np.roll(x_c, -1) - np.roll(x_c, 1)
+        )
+        self._lerp_track_angle = interp1d(
+            np.linspace(0, 1, len(track_angles), endpoint=False),
+            track_angles,
+            fill_value="extrapolate",  # type: ignore
+        )
+
+        self._centreline = shapely.LineString(track_df[["x_centreline", "y_centreline"]])
         self._start_position = np.array(
             [self._centreline.coords[0][0], self._centreline.coords[0][1]]
         )
@@ -121,7 +140,7 @@ class LtsEnv(gym.Env):
         )
 
         # Store initial heading
-        self._initial_heading = self._calculate_angle_to_track() 
+        self._initial_heading = self._calculate_angle_to_track()
 
         # Define the observation and action spaces
         self.num_rangefinders = num_rangefinders
@@ -159,9 +178,14 @@ class LtsEnv(gym.Env):
 
         # Array of (start, end) tuples for rendering rangefinder rays
         self._rays: List[Tuple[NDArray, NDArray]] = []
+        self._relative_ray_angles = np.linspace(-np.pi / 2, np.pi / 2, self.num_rangefinders)
 
     def _draw_shapely_shape(
-        self, canvas: pygame.Surface, shape: shapely.geometry.base.BaseGeometry, color=Colors.WHITE, width=1
+        self,
+        canvas: pygame.Surface,
+        shape: shapely.geometry.base.BaseGeometry,
+        color=Colors.WHITE,
+        width=1,
     ):
         def coords_to_pixels(coords: CoordinateSequence) -> list[tuple[int, int]]:
             # Convert world coordinates to pixel coordinates, centering on the car's position
@@ -211,12 +235,7 @@ class LtsEnv(gym.Env):
         pygame.draw.rect(
             canvas,
             color,
-            (
-                0,
-                half_screen - (0 if throttle < 0 else throttle_length),
-                bar_width,
-                throttle_length
-            )
+            (0, half_screen - (0 if throttle < 0 else throttle_length), bar_width, throttle_length),
         )
 
         # Draw steering bar (horizontal bar on the top)
@@ -224,11 +243,12 @@ class LtsEnv(gym.Env):
             canvas,
             color,
             (
-                half_screen - (0 if steering < 0 else steering_length),  # Extends rightwards for a right turn
+                half_screen
+                - (0 if steering < 0 else steering_length),  # Extends rightwards for a right turn
                 0,
                 steering_length,
-                bar_width
-            )
+                bar_width,
+            ),
         )
 
     def render(self) -> NDArray | None:
@@ -305,19 +325,8 @@ class LtsEnv(gym.Env):
 
     def _calculate_angle_to_track(self) -> float:
         # Calculate the angle between the car's heading and the tangent to the centreline at the closest point
-        nearest_centreline_point = self._closed_centreline.interpolate(
-            self._progress, normalized=True
-        )
-
-        ds_fractional = 1e-5  # For tangent approximation
-        tangent: Vec2 = np.array(
-            self._closed_centreline.interpolate(
-                self._progress + ds_fractional, normalized=True
-            ).coords[0]
-        ) - np.array(nearest_centreline_point.coords[0])
-
-        tangent_angle = np.arctan2(tangent[1], tangent[0])
-        angle_to_track = tangent_angle - self._state.heading
+        track_angle = self._lerp_track_angle(self._progress)
+        angle_to_track = track_angle - self._state.heading
 
         # Normalize angle to [-pi, pi]
         # Negative => car is pointing to the left of the track
@@ -325,15 +334,15 @@ class LtsEnv(gym.Env):
         return angle_to_track
 
     def _calculate_ranges(self) -> NDArray:
-        self._rays.clear()  # Clear previous rays for rendering
+        if self.render_mode == "human":
+            self._rays.clear()  # Clear previous rays for rendering
 
         heading = self._state.heading
-        angles = np.linspace(heading - np.pi / 2, heading + np.pi / 2, self.num_rangefinders)
 
         ranges = np.full(
             self.num_rangefinders, self._max_range
         )  # Initialize all ranges to max_range
-        for i, angle in enumerate(angles):
+        for i, angle in enumerate(heading + self._relative_ray_angles):
             ray_direction: Vec2 = np.array([np.cos(angle), np.sin(angle)])
             ray_end = self._state.position + ray_direction * self._max_range
             ray_line = shapely.LineString([self._state.position, ray_end])
@@ -346,7 +355,8 @@ class LtsEnv(gym.Env):
                 ranges[i] = distances[min_distance_idx]
 
                 # For rendering
-                self._rays.append((self._state.position, intersection_coords[min_distance_idx]))
+                if self.render_mode == "human":
+                    self._rays.append((self._state.position, intersection_coords[min_distance_idx]))
 
         return ranges
 
@@ -398,6 +408,9 @@ class LtsEnv(gym.Env):
         super().reset(seed=seed)
 
         self._progress = 0.0
+        self._latest_action = np.array(
+            [0.0, 0.0]
+        )  # [throttle, steering] required for rendering action bars
 
         self._state: CarState = CarState(
             position=self._start_position.copy(),  # Don't overwrite the original start position
@@ -407,29 +420,26 @@ class LtsEnv(gym.Env):
             angular_velocity=0.0,
         )
 
-        self._car_shape = shapely.Point(self._state.position)
-
         observation = self._get_obs()
         info = self._get_info()
         return observation, info
 
     def _calculate_reward(self, action: NDArray, obs: _LtsObservation, is_colliding: bool) -> float:
         reward = 0.0
-        
+
         # Reward increase in progress along the centreline
         reward += self._rcs.progress * (self._progress - self._previous_progress)
         self._previous_progress = self._progress
 
-
         # Reward velocity component in the direction of the track
         speed = vec_norm(self._state.velocity)
-        parallel_velocity = speed * obs["kinematic_state"][4] # cos(angle_to_track)
+        parallel_velocity = speed * obs["kinematic_state"][4]  # cos(angle_to_track)
         reward += self._rcs.parallel_velocity * parallel_velocity
 
         # Reward survival
         if self._state.velocity[0] < 0.1:
             reward += self._rcs.survival
-        
+
         # Penalise collisions
         if is_colliding:
             reward += self._rcs.collision
@@ -439,32 +449,31 @@ class LtsEnv(gym.Env):
     def step(self, action: NDArray):
         # Update the car's state based on the action using the car model
         self._state = self._car_model.step(
-            self._state, throttle=action[0], steering=action[1], dt=1 / self.metadata["render_fps"]
+            self._state, throttle=action[0], steering=action[1], dt=self._dt
         )
-        
-        # Update the latest observation after stepping the car
+
+        # Make a new observation after stepping the car
         obs = self._get_obs()
 
         # Update the car shape for collision detection and rendering
         self._car_shape = shapely.Point(self._state.position)
         self._update_progress()
         self._latest_action = action  # For rendering the action bars
-                
+
         # Check for collisions
         is_colliding = not self._track.contains(self._car_shape)
 
         # Render the environment
         if self.render_mode == "human":
             self.render()
-        
+
         # Calculate reward
         reward = self._calculate_reward(action, obs, is_colliding)
 
         # Terminate if the car has completed a lap or gone off-track
         terminated = (self._progress >= 0.99) or is_colliding
-        
+
         # No explicit truncation here, but a wrapper could be used externally if desired
         truncated = False
-
 
         return obs, reward, terminated, truncated, self._get_info()

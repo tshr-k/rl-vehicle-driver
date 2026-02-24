@@ -39,9 +39,11 @@ def make_env():
     )
 
 
+print("Starting training...")
+
 if __name__ == "__main__":
     # Initialise the parallel environment
-    NUM_PROCESSES = 4
+    NUM_PROCESSES = 16
     vec_env = SubprocVecEnv([make_env for _ in range(NUM_PROCESSES)])
 
     # Normalize observations and rewards for stable training
