@@ -1,3 +1,4 @@
+from dataclasses import asdict
 from typing import cast
 
 import gymnasium as gym
@@ -5,6 +6,7 @@ import numpy as np
 import pygame
 
 from environment.car_model import KinematicBicycleModel
+from environment.lts_env import ResetOptions
 
 # Register and create environment
 gym.register(
@@ -13,6 +15,11 @@ gym.register(
 )
 
 car_model = KinematicBicycleModel()
+
+RESET_OPTIONS = ResetOptions(
+    randomise_start=True,
+    randomise_track=False,
+)
 
 env = gym.make(
     "LTS-v0",
@@ -64,7 +71,7 @@ while running:
     observation, reward, terminated, truncated, info = env.step(action)
 
     if terminated or truncated:
-        observation, info = env.reset()
+        observation, info = env.reset(options=asdict(RESET_OPTIONS))
 
     for event in pygame.event.get():
         if event.type == pygame.QUIT:

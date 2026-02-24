@@ -37,8 +37,8 @@ class RewardCoefficients:
 class ResetOptions:
     """Options for resetting the LTS environment"""
 
-    randomize_start: bool = False  # Whether to randomize the starting position along the track
-    randomize_track: bool = (
+    randomise_start: bool = True  # Whether to randomize the starting position along the track
+    randomise_track: bool = (
         False  # Whether to randomize the track (if multiple tracks are available)
     )
 
@@ -63,8 +63,8 @@ class LtsEnv(gym.Env):
         self._car_model = car_model
         self._dt = dt  # Physical simulation timestep in seconds
 
-        # Initialise lap progress
-        self._progress = 0.0  # Fraction of the track completed, from 0 to 1
+        # Declare progress variables. Will be randomised in reset()
+        self._progress = 0.0  # [0, 1]
         self._previous_progress = 0.0  # For reward calculation
 
         # Store reward coefficients, using default values if not provided
@@ -93,9 +93,7 @@ class LtsEnv(gym.Env):
         )
 
         self._centreline = shapely.LineString(track_df[["x_centreline", "y_centreline"]])
-        self._start_position = np.array(
-            [self._centreline.coords[0][0], self._centreline.coords[0][1]]
-        )
+        self._track_start = np.array([self._centreline.coords[0][0], self._centreline.coords[0][1]])
         self._closed_centreline = shapely.LinearRing(self._centreline)
 
         outer_boundary = shapely.offset_curve(self._centreline, abs(track_df["w_left"]))[0]
@@ -321,7 +319,7 @@ class LtsEnv(gym.Env):
 
     def _update_progress(self):
         car_point = shapely.Point(self._state.position)
-        self._progress = self._closed_centreline.project(car_point, normalized=True)
+        self._progress = self._closed_centreline.project(car_point, normalized=True)  # [0, 1]
 
     def _calculate_angle_to_track(self) -> float:
         # Calculate the angle between the car's heading and the tangent to the centreline at the closest point
@@ -407,16 +405,30 @@ class LtsEnv(gym.Env):
     ) -> Tuple[_LtsObservation, Dict]:
         super().reset(seed=seed)
 
-        self._progress = 0.0
+        if options and options.randomise_start:
+            self._progress = self.np_random.uniform(0, 1)
+            position: Vec2 = np.squeeze(
+                shapely.get_coordinates(
+                    self._closed_centreline.interpolate(self._progress, normalized=True)
+                )
+            )
+            heading = self._lerp_track_angle(self._progress)
+        else:
+            self._progress = 0.0
+            position: Vec2 = self._track_start.copy()  # Don't overwrite the original start position
+            heading = self._initial_heading  # Start with the car aligned to the track
+
+        self._previous_progress = self._progress  # Reset previous progress for reward calculation
+
         self._latest_action = np.array(
             [0.0, 0.0]
         )  # [throttle, steering] required for rendering action bars
 
         self._state: CarState = CarState(
-            position=self._start_position.copy(),  # Don't overwrite the original start position
+            position=position,
             velocity=np.array([0.0, 0.0]),
             acceleration=np.array([0.0, 0.0]),
-            heading=self._initial_heading,  # Start aligned with the track
+            heading=heading,
             angular_velocity=0.0,
         )
 
@@ -427,8 +439,12 @@ class LtsEnv(gym.Env):
     def _calculate_reward(self, action: NDArray, obs: _LtsObservation, is_colliding: bool) -> float:
         reward = 0.0
 
-        # Reward increase in progress along the centreline
-        reward += self._rcs.progress * (self._progress - self._previous_progress)
+        # Reward increase in progress along the centreline, handling wrap-around from 0.99 back to 0.0 at the end of the track
+        progress_increment = self._progress - self._previous_progress
+        if progress_increment < -0.5:  # Wrapped around the end of the track
+            progress_increment += 1.0
+
+        reward += self._rcs.progress * progress_increment
         self._previous_progress = self._progress
 
         # Reward velocity component in the direction of the track
@@ -470,8 +486,8 @@ class LtsEnv(gym.Env):
         # Calculate reward
         reward = self._calculate_reward(action, obs, is_colliding)
 
-        # Terminate if the car has completed a lap or gone off-track
-        terminated = (self._progress >= 0.99) or is_colliding
+        # Terminate if the car has gone off-track
+        terminated = is_colliding
 
         # No explicit truncation here, but a wrapper could be used externally if desired
         truncated = False

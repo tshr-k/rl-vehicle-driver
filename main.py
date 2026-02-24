@@ -3,7 +3,7 @@ from stable_baselines3 import PPO
 from stable_baselines3.common.vec_env import SubprocVecEnv, VecNormalize
 
 from environment.car_model import KinematicBicycleModel
-from environment.lts_env import RewardCoefficients
+from environment.lts_env import ResetOptions, RewardCoefficients
 
 # Define environment parameters
 TRACK_CSV_PATH = "data/tracks/MexicoCity.csv"
@@ -15,6 +15,10 @@ REWARD_COEFFICIENTS = RewardCoefficients(
     survival=+0.1,
     collision=-100.0,
 )
+RESET_OPTIONS = ResetOptions(
+    randomise_start=True,
+    randomise_track=False,
+)
 
 # Register the base environment
 gym.register(
@@ -24,6 +28,7 @@ gym.register(
 
 # Initialise the car physics model
 car_model = KinematicBicycleModel()
+
 
 def make_env():
     # Create the training environment
@@ -36,6 +41,7 @@ def make_env():
         reward_coefficients=REWARD_COEFFICIENTS,
         car_model=car_model,
         follow_car=False,
+        reset_options=RESET_OPTIONS,
     )
 
 
@@ -48,11 +54,10 @@ if __name__ == "__main__":
 
     # Normalize observations and rewards for stable training
     vec_env = VecNormalize(vec_env, norm_obs=True, norm_reward=True)
-    
+
     # Define the agent
     agent = PPO("MultiInputPolicy", vec_env, verbose=1)
     agent.learn(total_timesteps=10_000)
-
 
     print("Training complete")
 
@@ -78,4 +83,3 @@ if __name__ == "__main__":
 
 #     if terminated or truncated:
 #         obs, _ = env_eval.reset()
-
