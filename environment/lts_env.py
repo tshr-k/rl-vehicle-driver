@@ -37,10 +37,8 @@ class RewardCoefficients:
 class ResetOptions:
     """Options for resetting the LTS environment"""
 
-    randomise_start: bool = True  # Whether to randomize the starting position along the track
-    randomise_track: bool = (
-        False  # Whether to randomize the track (if multiple tracks are available)
-    )
+    randomise_start: bool = True
+    randomise_track: bool = False
 
 
 class LtsEnv(gym.Env):
@@ -57,6 +55,7 @@ class LtsEnv(gym.Env):
         max_range: float = 100.0,
         render_mode: str | None = None,
         follow_car: bool = True,
+        reset_options: ResetOptions | None = None,
     ):
         super().__init__()
 
@@ -118,6 +117,11 @@ class LtsEnv(gym.Env):
         scale_y = self._screen_size / track_height
 
         self._scale = min(scale_x, scale_y) * (self._follow_car_zoom if follow_car else 1.0)
+
+        # Set reset options, using default values if not provided
+        if reset_options is None:
+            reset_options = ResetOptions()
+        self._reset_options = reset_options
 
         # Validate and set render mode
         if (render_mode is not None) and (render_mode not in self.metadata["render_modes"]):
@@ -401,11 +405,11 @@ class LtsEnv(gym.Env):
         }
 
     def reset(
-        self, seed: int | None = None, options: ResetOptions | None = None
+        self, seed: int | None = None, options: Dict | None = None
     ) -> Tuple[_LtsObservation, Dict]:
         super().reset(seed=seed)
 
-        if options and options.randomise_start:
+        if self._reset_options.randomise_start:
             self._progress = self.np_random.uniform(0, 1)
             position: Vec2 = np.squeeze(
                 shapely.get_coordinates(
@@ -415,7 +419,9 @@ class LtsEnv(gym.Env):
             heading = self._lerp_track_angle(self._progress)
         else:
             self._progress = 0.0
-            position: Vec2 = self._track_start.copy()  # Don't overwrite the original start position
+            position: Vec2 = (
+                self._track_start.copy()
+            )  # Don't overwrite the reference start position
             heading = self._initial_heading  # Start with the car aligned to the track
 
         self._previous_progress = self._progress  # Reset previous progress for reward calculation

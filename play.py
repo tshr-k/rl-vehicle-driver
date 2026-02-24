@@ -1,4 +1,3 @@
-from dataclasses import asdict
 from typing import cast
 
 import gymnasium as gym
@@ -29,6 +28,7 @@ env = gym.make(
     num_future_curvatures=20,
     car_model=car_model,
     follow_car=True,
+    reset_options=RESET_OPTIONS,
 )
 
 
@@ -71,7 +71,7 @@ while running:
     observation, reward, terminated, truncated, info = env.step(action)
 
     if terminated or truncated:
-        observation, info = env.reset(options=asdict(RESET_OPTIONS))
+        observation, info = env.reset()
 
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
