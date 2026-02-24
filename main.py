@@ -62,26 +62,27 @@ if __name__ == "__main__":
     agent.learn(total_timesteps=10_000)
 
     print("Training complete")
+    vec_env.close()
 
 
-# Create a new environment with rendering enabled for evaluation
-env_eval = gym.make(
-    "LTS-v0",
-    render_mode="human",
-    track_csv_path=TRACK_CSV_PATH,
-    num_rangefinders=NUM_RANGEFINDERS,
-    num_future_curvatures=NUM_FUTURE_CURVATURES,
-    car_model=car_model,
-    follow_car=False,
-)
+    # Create a new environment with rendering enabled for evaluation
+    env_eval = gym.make(
+        "LTS-v0",
+        render_mode="human",
+        track_csv_path=TRACK_CSV_PATH,
+        num_rangefinders=NUM_RANGEFINDERS,
+        num_future_curvatures=NUM_FUTURE_CURVATURES,
+        car_model=car_model,
+        follow_car=False,
+    )
 
-# Run the trained agent
-obs, _ = env_eval.reset()
-while True:
-    action, _ = agent.predict(obs, deterministic=True)
-    obs, reward, terminated, truncated, info = env_eval.step(action)
+    # Run the trained agent
+    obs, _ = env_eval.reset()
+    while True:
+        action, _ = agent.predict(obs, deterministic=True)
+        obs, reward, terminated, truncated, info = env_eval.step(action)
 
-    print(info)
+        print(info)
 
-    if terminated or truncated:
-        obs, _ = env_eval.reset()
+        if terminated or truncated:
+            obs, _ = env_eval.reset()
