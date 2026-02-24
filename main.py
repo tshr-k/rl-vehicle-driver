@@ -53,7 +53,9 @@ if __name__ == "__main__":
     vec_env = SubprocVecEnv([make_env for _ in range(NUM_PROCESSES)])
 
     # Normalize observations and rewards for stable training
-    vec_env = VecNormalize(vec_env, norm_obs=True, norm_reward=True)
+
+    # UNCOMMENT AFTER TESTING WITHOUT NORMALIZATION
+    # vec_env = VecNormalize(vec_env, norm_obs=True, norm_reward=True)
 
     # Define the agent
     agent = PPO("MultiInputPolicy", vec_env, verbose=1)
@@ -63,23 +65,23 @@ if __name__ == "__main__":
 
 
 # Create a new environment with rendering enabled for evaluation
-# env_eval = gym.make(
-#     "LTS-v0",
-#     render_mode="human",
-#     track_csv_path=TRACK_CSV_PATH,
-#     num_rangefinders=NUM_RANGEFINDERS,
-#     num_future_curvatures=NUM_FUTURE_CURVATURES,
-#     car_model=car_model,
-#     follow_car=False,
-# )
+env_eval = gym.make(
+    "LTS-v0",
+    render_mode="human",
+    track_csv_path=TRACK_CSV_PATH,
+    num_rangefinders=NUM_RANGEFINDERS,
+    num_future_curvatures=NUM_FUTURE_CURVATURES,
+    car_model=car_model,
+    follow_car=False,
+)
 
-# # Run the trained agent
-# obs, _ = env_eval.reset()
-# while True:
-#     action, _ = agent.predict(obs, deterministic=True)
-#     obs, reward, terminated, truncated, info = env_eval.step(action)
+# Run the trained agent
+obs, _ = env_eval.reset()
+while True:
+    action, _ = agent.predict(obs, deterministic=True)
+    obs, reward, terminated, truncated, info = env_eval.step(action)
 
-#     print(info)
+    print(info)
 
-#     if terminated or truncated:
-#         obs, _ = env_eval.reset()
+    if terminated or truncated:
+        obs, _ = env_eval.reset()
