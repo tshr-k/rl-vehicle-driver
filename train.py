@@ -7,9 +7,11 @@ if not os.environ.get("DISPLAY"):
     display = Display(visible=False, size=(1400, 900))
     display.start()
 
+# Suppress gym, TensorFlow and gRPC warnings for cleaner output
 import warnings
-
 warnings.filterwarnings("ignore", category=DeprecationWarning, module="gym")
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3' 
+os.environ['GRPC_VERBOSITY'] = 'ERROR'
 
 
 import gymnasium as gym
@@ -51,11 +53,14 @@ gym.register(
 car_model = KinematicBicycleModel()
 
 
-def make_env() -> gym.Env:
+def make_env(id: int) -> gym.Env:
+    # Only render the first environment for video recording
+    render_mode = "rgb_array" if id == 0 else None
+
     # Create the training environment
     return gym.make(
         "LTS-v0",
-        render_mode=None,  # Let VecVideoRecorder handle rendering
+        render_mode=render_mode,
         track_csv_path=TRACK_CSV_PATH,
         num_rangefinders=NUM_RANGEFINDERS,
         num_future_curvatures=NUM_FUTURE_CURVATURES,
@@ -95,8 +100,8 @@ if __name__ == "__main__":
 
     print("Starting training...")
     # Initialise the parallel environment
-    NUM_PROCESSES = 4
-    vec_env = SubprocVecEnv([make_env for _ in range(NUM_PROCESSES)])
+    NUM_PROCESSES = 8
+    vec_env = SubprocVecEnv([lambda i=i: make_env(i) for i in range(NUM_PROCESSES)])
 
     # Normalize observations and rewards for stable training
     vec_env = VecNormalize(vec_env, norm_obs=True, norm_reward=True)
