@@ -17,7 +17,7 @@ class CarModel(ABC):
         self,
         wheelbase=3.6,
         com_to_rear=1.65,
-        max_steering_angle=np.radians(15),
+        max_steering_angle=np.radians(30),
         max_steering_rate=np.radians(90),
         frontal_area=1.5,
         drag_coefficient=0.8,

@@ -4,8 +4,12 @@ run.ipynb
 # Video recordings
 videos/
 
+# Trained model weights
+models/
+
 # Weights & Biases artifacts
 wandb/
+runs/
 
 # To do list
 TODO.md
