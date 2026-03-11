@@ -1,3 +1,12 @@
+import os
+
+# Initialise a virtual display in headless environments like Colab/SageMaker
+if not os.environ.get("DISPLAY"):
+    from pyvirtualdisplay.display import Display
+
+    display = Display(visible=False, size=(1400, 900))
+    display.start()
+
 import warnings
 
 warnings.filterwarnings("ignore", category=DeprecationWarning, module="gym")
@@ -5,7 +14,12 @@ warnings.filterwarnings("ignore", category=DeprecationWarning, module="gym")
 
 import gymnasium as gym
 from stable_baselines3 import PPO
-from stable_baselines3.common.vec_env import SubprocVecEnv, VecNormalize, VecVideoRecorder, VecMonitor
+from stable_baselines3.common.vec_env import (
+    SubprocVecEnv,
+    VecMonitor,
+    VecNormalize,
+    VecVideoRecorder,
+)
 from wandb.integration.sb3 import WandbCallback
 
 import wandb
@@ -41,7 +55,7 @@ def make_env() -> gym.Env:
     # Create the training environment
     return gym.make(
         "LTS-v0",
-        render_mode="rgb_array",
+        render_mode=None,  # Let VecVideoRecorder handle rendering
         track_csv_path=TRACK_CSV_PATH,
         num_rangefinders=NUM_RANGEFINDERS,
         num_future_curvatures=NUM_FUTURE_CURVATURES,
@@ -81,7 +95,7 @@ if __name__ == "__main__":
 
     print("Starting training...")
     # Initialise the parallel environment
-    NUM_PROCESSES = 16
+    NUM_PROCESSES = 4
     vec_env = SubprocVecEnv([make_env for _ in range(NUM_PROCESSES)])
 
     # Normalize observations and rewards for stable training
@@ -115,8 +129,6 @@ if __name__ == "__main__":
 
     vec_env.close()
     wandb.finish()
-
-
 
     # agent.save("ppo_lts_agent")
 
