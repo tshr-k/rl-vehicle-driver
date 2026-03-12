@@ -1,4 +1,6 @@
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
+from typing import ClassVar
 
 import numpy as np
 from scipy.interpolate import CubicSpline
@@ -7,42 +9,32 @@ from environment.car_state import CarState
 from utils.geom import vec_norm
 
 
+@dataclass
 class CarModel(ABC):
     """A stateless model for the car's dynamics."""
 
-    air_density = 1.225
-    g = 9.81
+    air_density: ClassVar[float] = 1.225
+    g: ClassVar[float] = 9.81
 
-    def __init__(
-        self,
-        wheelbase=3.6,
-        com_to_rear=1.65,
-        max_steering_angle=np.radians(30),
-        max_steering_rate=np.radians(90),
-        frontal_area=1.5,
-        drag_coefficient=0.8,
-        downforce_coefficient=4.0,
-        rolling_friction_coefficient=0.020,
-        mass=850.0,
-        max_thrust=11_000.0,
-        max_brake_force=-38_000.0,
-    ):
-        super().__init__()
+    # Geometric and kinematic parameters
+    wheelbase: float = 3.6
+    com_to_rear: float = 1.65
+    max_steering_angle: float = np.radians(30)
+    max_steering_rate: float = np.radians(90)
+    frontal_area: float = 1.5
 
-        # Geometric and kinematic parameters
-        self.wheelbase = wheelbase
-        self.com_to_rear = com_to_rear
-        self.max_steering_angle = max_steering_angle
-        self.frontal_area = frontal_area
+    # Dynamic parameters
+    drag_coefficient: float = 0.8
+    downforce_coefficient: float = 4.0
+    rolling_friction_coefficient: float = 0.020
+    mass: float = 850.0
+    max_thrust: float = 11_000.0
+    max_brake_force: float = -38_000.0
+    tyre_friction_coefficient: float = 1.5
 
-        # Dynamic parameters
-        self.drag_coefficient = drag_coefficient
-        self.downforce_coefficient = downforce_coefficient
-        self.rolling_friction_coefficient = rolling_friction_coefficient
-        self.tyre_friction_coefficient = 1.5
-        self.mass = mass
-        self.max_thrust = max_thrust
-        self.max_brake_force = -abs(max_brake_force)  # Ensure it's negative
+    def __post_init__(self) -> None:
+        # Ensure braking force is always negative
+        self.max_brake_force = -abs(self.max_brake_force)
 
     def _compute_drag(self, speed: float) -> float:
         return 0.5 * self.air_density * self.frontal_area * self.drag_coefficient * speed**2
@@ -69,15 +61,18 @@ class CarModel(ABC):
         """
 
 
+@dataclass
 class KinematicBicycleModel(CarModel):
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
+    def __post_init__(self) -> None:
+        super().__post_init__()
 
         throttle_waypoints = np.array([-1, 0, 1])
         force_waypoints = np.array([self.max_brake_force, 0, self.max_thrust])
 
         self._throttle_to_force = CubicSpline(
-            throttle_waypoints, force_waypoints, bc_type=("natural", "clamped")  # type: ignore
+            throttle_waypoints,
+            force_waypoints,
+            bc_type=("natural", "clamped"),  # type: ignore
         )
 
     def step(self, state: CarState, throttle: float, steering: float, dt: float) -> CarState:
@@ -112,12 +107,14 @@ class KinematicBicycleModel(CarModel):
         required_lat_accel = abs(speed_next**2 * np.tan(delta) / self.wheelbase)
 
         # Calculate max available lateral force and corresponding acceleration based on tyre friction limits
-        max_lat_force = (self.mass * self.g + self._compute_downforce(speed_next)) * self.tyre_friction_coefficient
+        max_lat_force = (
+            self.mass * self.g + self._compute_downforce(speed_next)
+        ) * self.tyre_friction_coefficient
         max_lat_accel = max_lat_force / self.mass
 
         if required_lat_accel > max_lat_accel:
             # Scale omega down because the car is understeering/sliding
-            omega_next *= (max_lat_accel / required_lat_accel)
+            omega_next *= max_lat_accel / required_lat_accel
 
         # 4. Update Heading
         theta_next = state.heading + (omega_next * dt)

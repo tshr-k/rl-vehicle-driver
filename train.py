@@ -1,10 +1,13 @@
 import os
+from enum import Enum
 from pathlib import Path
+
+import typer
 
 # Suppress gym, TensorFlow and gRPC warnings for cleaner output
 os.environ["GYM_IGNORE_WARNINGS"] = "1"
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3' 
-os.environ['GRPC_VERBOSITY'] = 'ERROR'
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
+os.environ["GRPC_VERBOSITY"] = "ERROR"
 
 
 # Initialise a virtual display in headless environments like Colab/SageMaker
@@ -29,23 +32,56 @@ import wandb
 from environment.car_model import KinematicBicycleModel
 from environment.lts_env import ResetOptions, RewardCoefficients
 
-
 # Define absolute paths to avoid folder recursion issues
 PROJECT_ROOT = Path("/content/rl-lap-time-simulator").resolve()
 VIDEO_DIR = str(PROJECT_ROOT / "videos")
 LOG_DIR = str(PROJECT_ROOT / "logs")
 MODEL_DIR = str(PROJECT_ROOT / "models")
 
+
+# Define options for validating CLI arguments
+class CarModelOption(str, Enum):
+    kinematic_bicycle = "kinematic_bicycle"
+
+
+class TrackOption(str, Enum):
+    Austin = "Austin.csv"
+    BrandsHatch = "BrandsHatch.csv"
+    Budapest = "Budapest.csv"
+    Catalunya = "Catalunya.csv"
+    Hockenheim = "Hockenheim.csv"
+    IMS = "IMS.csv"
+    Melbourne = "Melbourne.csv"
+    MexicoCity = "MexicoCity.csv"
+    Montreal = "Montreal.csv"
+    Monza = "Monza.csv"
+    MoscowRaceway = "MoscowRaceway.csv"
+    Norisring = "Norisring.csv"
+    Nuerburgring = "Nuerburgring.csv"
+    Oschersleben = "Oschersleben.csv"
+    Sakhir = "Sakhir.csv"
+    SaoPaulo = "SaoPaulo.csv"
+    Sepang = "Sepang.csv"
+    Shanghai = "Shanghai.csv"
+    Silverstone = "Silverstone.csv"
+    Sochi = "Sochi.csv"
+    Spa = "Spa.csv"
+    Spielberg = "Spielberg.csv"
+    Suzuka = "Suzuka.csv"
+    YasMarina = "YasMarina.csv"
+    Zandvoort = "Zandvoort.csv"
+
+
+# Map car model names to their corresponding classes
+CAR_MODELS = {
+    CarModelOption.kinematic_bicycle.value: KinematicBicycleModel,
+}
+
+
 # Define environment parameters
-TRACK_CSV_PATH = str(PROJECT_ROOT / "data" / "tracks" / "MexicoCity.csv")
+TRACKS_DIR = PROJECT_ROOT / "data" / "tracks"
 NUM_RANGEFINDERS = 6
-NUM_FUTURE_CURVATURES = 20
-REWARD_COEFFICIENTS = RewardCoefficients(
-    progress=+5.0,
-    parallel_velocity=0.1,
-    survival=+0.2,
-    collision=-200.0,
-)
+NUM_FUTURE_CURVATURES = 25
 RESET_OPTIONS = ResetOptions(
     randomise_start=True,
     randomise_track=False,
@@ -57,41 +93,85 @@ gym.register(
     entry_point="environment.lts_env:LtsEnv",
 )
 
-# Initialise the car physics model
-car_model = KinematicBicycleModel()
 
+def make_env(config: dict) -> gym.Env:
+    # Initialise the car physics model from the selected option
+    car_model_cls = CAR_MODELS[config["car_model"]]
+    car_model = car_model_cls()
 
-def make_env() -> gym.Env:
+    reward_coefficients = RewardCoefficients(
+        progress=config["reward_progress"],
+        parallel_velocity=config["reward_parallel_velocity"],
+        survival=config["reward_survival"],
+        collision=config["reward_collision"],
+    )
+
+    reset_options = ResetOptions(
+        randomise_start=config["reset_randomise_start"],
+        randomise_track=config["reset_randomise_track"],
+    )
+
     # Create the training environment
     return gym.make(
         "LTS-v0",
         render_mode="rgb_array",
-        track_csv_path=TRACK_CSV_PATH,
-        num_rangefinders=NUM_RANGEFINDERS,
-        num_future_curvatures=NUM_FUTURE_CURVATURES,
-        reward_coefficients=REWARD_COEFFICIENTS,
+        track_csv_path=config["track_csv_path"],
+        num_rangefinders=config["num_rangefinders"],
+        num_future_curvatures=config["num_future_curvatures"],
+        reward_coefficients=reward_coefficients,
         car_model=car_model,
         follow_car=False,
-        reset_options=RESET_OPTIONS,
+        reset_options=reset_options,
     )
 
 
-if __name__ == "__main__":
-    # Get a representation of the car model for logging, excluding private attributes
-    car_model_repr = {
-        "model": car_model.__class__.__name__,
-        **{k: v for k, v in car_model.__dict__.items() if not k.startswith("_")},
-    }
+def main(
+    # Training parameters
+    total_timesteps: int = 100,
+    model_save_freq: int = 99,
+    gradient_save_freq: int = 49,
+    video_save_freq: int = 49,
+    # Environment parameters
+    num_processes: int = 4,
+    track: TrackOption = TrackOption.MexicoCity,
+    num_rangefinders: int = NUM_RANGEFINDERS,
+    num_future_curvatures: int = NUM_FUTURE_CURVATURES,
+    # Reward coefficients (flattened)
+    reward_progress: float = 5.0,
+    reward_parallel_velocity: float = 0.1,
+    reward_survival: float = 0.2,
+    reward_collision: float = -200.0,
+    # Reset options (flattened)
+    reset_randomise_start: bool = RESET_OPTIONS.randomise_start,
+    reset_randomise_track: bool = RESET_OPTIONS.randomise_track,
+    # Car model selection
+    car_model: CarModelOption = CarModelOption.kinematic_bicycle,
+) -> None:
+
+    track_csv_path = str(TRACKS_DIR / track.value)
 
     # Initialise Weights & Biases for experiment tracking
     config = {
-        "total_timesteps": 100,
-        "track_csv_path": TRACK_CSV_PATH,
-        "num_rangefinders": NUM_RANGEFINDERS,
-        "num_future_curvatures": NUM_FUTURE_CURVATURES,
-        "reward_coefficients": REWARD_COEFFICIENTS.__dict__,
-        "reset_options": RESET_OPTIONS.__dict__,
-        "car_model": car_model_repr,
+        # Training parameters
+        "total_timesteps": total_timesteps,
+        "model_save_freq": model_save_freq,
+        "gradient_save_freq": gradient_save_freq,
+        "video_save_freq": video_save_freq,
+        # Environment parameters
+        "num_processes": num_processes,
+        "track_csv_path": track_csv_path,
+        "num_rangefinders": num_rangefinders,
+        "num_future_curvatures": num_future_curvatures,
+        # Reward coefficients (flattened)
+        "reward_progress": reward_progress,
+        "reward_parallel_velocity": reward_parallel_velocity,
+        "reward_survival": reward_survival,
+        "reward_collision": reward_collision,
+        # Reset options (flattened)
+        "reset_randomise_start": reset_randomise_start,
+        "reset_randomise_track": reset_randomise_track,
+        # Car model selection
+        "car_model": car_model.value,
     }
 
     run = wandb.init(
@@ -107,11 +187,10 @@ if __name__ == "__main__":
     for directory in [VIDEO_DIR, LOG_DIR, MODEL_DIR]:
         os.makedirs(directory, exist_ok=True)
 
-
     print("Starting training...")
     # Initialise the parallel environment
-    NUM_PROCESSES = 4
-    vec_env = SubprocVecEnv([make_env for _ in range(NUM_PROCESSES)])
+    NUM_PROCESSES = config["num_processes"]
+    vec_env = SubprocVecEnv([lambda: make_env(config) for _ in range(NUM_PROCESSES)])
 
     # Normalize observations and rewards for stable training
     vec_env = VecNormalize(vec_env, norm_obs=True, norm_reward=True)
@@ -122,7 +201,7 @@ if __name__ == "__main__":
     vec_env = VecVideoRecorder(
         vec_env,
         video_folder=VIDEO_DIR,
-        record_video_trigger=lambda x: x % 10_000 == 0,
+        record_video_trigger=lambda x: x % config["video_save_freq"] == 0,
         video_length=200,
         name_prefix="ppo_lts_agent",
     )
@@ -134,8 +213,8 @@ if __name__ == "__main__":
         callback=WandbCallback(
             verbose=0,
             model_save_path=f"models/{run.id}",
-            model_save_freq=10_000,
-            gradient_save_freq=1_000,
+            model_save_freq=config["model_save_freq"],
+            gradient_save_freq=config["gradient_save_freq"],
         ),
     )
 
@@ -148,3 +227,7 @@ if __name__ == "__main__":
 
     # Required for correct evaluation
     # vec_env.save("vec_normalize.pkl")
+
+
+if __name__ == "__main__":
+    typer.run(main)
