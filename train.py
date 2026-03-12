@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 
 # Suppress gym, TensorFlow and gRPC warnings for cleaner output
 os.environ["GYM_IGNORE_WARNINGS"] = "1"
@@ -28,8 +29,15 @@ import wandb
 from environment.car_model import KinematicBicycleModel
 from environment.lts_env import ResetOptions, RewardCoefficients
 
+
+# Define absolute paths to avoid folder recursion issues
+PROJECT_ROOT = Path("/content/rl-lap-time-simulator").resolve()
+VIDEO_DIR = str(PROJECT_ROOT / "videos")
+LOG_DIR = str(PROJECT_ROOT / "logs")
+MODEL_DIR = str(PROJECT_ROOT / "models")
+
 # Define environment parameters
-TRACK_CSV_PATH = "data/tracks/MexicoCity.csv"
+TRACK_CSV_PATH = str(PROJECT_ROOT / "data" / "tracks" / "MexicoCity.csv")
 NUM_RANGEFINDERS = 6
 NUM_FUTURE_CURVATURES = 20
 REWARD_COEFFICIENTS = RewardCoefficients(
@@ -95,6 +103,11 @@ if __name__ == "__main__":
         save_code=True,
     )
 
+    # Create directories for videos, logs and models if they don't exist
+    for directory in [VIDEO_DIR, LOG_DIR, MODEL_DIR]:
+        os.makedirs(directory, exist_ok=True)
+
+
     print("Starting training...")
     # Initialise the parallel environment
     NUM_PROCESSES = 4
@@ -106,10 +119,9 @@ if __name__ == "__main__":
     # Monitor the environment to log episode rewards and lengths
     vec_env = VecMonitor(vec_env)
 
-    # Record agent performance videos
     vec_env = VecVideoRecorder(
         vec_env,
-        video_folder=f"videos/{run.id}",
+        video_folder=VIDEO_DIR,
         record_video_trigger=lambda x: x % 10_000 == 0,
         video_length=200,
         name_prefix="ppo_lts_agent",
