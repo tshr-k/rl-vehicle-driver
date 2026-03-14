@@ -1,6 +1,8 @@
 import os
+import platform
 from enum import Enum
 from pathlib import Path
+from typing import Any, Dict
 
 import typer
 
@@ -11,7 +13,7 @@ os.environ["GRPC_VERBOSITY"] = "ERROR"
 
 
 # Initialise a virtual display in headless environments like Colab/SageMaker
-if not os.environ.get("DISPLAY"):
+if (platform.system() == "Linux") and (not os.environ.get("DISPLAY")):
     from pyvirtualdisplay.display import Display
 
     display = Display(visible=False, size=(1400, 900))
@@ -32,11 +34,27 @@ import wandb
 from environment.car_model import KinematicBicycleModel
 from environment.lts_env import ResetOptions, RewardCoefficients
 
-# Define absolute paths to avoid folder recursion issues
-PROJECT_ROOT = Path("/content/rl-lap-time-simulator").resolve()
-VIDEO_DIR = str(PROJECT_ROOT / "videos")
-LOG_DIR = str(PROJECT_ROOT / "logs")
-MODEL_DIR = str(PROJECT_ROOT / "models")
+
+# Define absolute paths using a dynamic project root finder
+def get_project_root() -> Path:
+    """Return the project root depending on the execution environment."""
+
+    # 1. Check for Colab first
+    if os.path.exists("/content"):
+        return Path("/content/rl-lap-time-simulator")
+
+    # 2. Check if we are in a script (.py)
+    try:
+        return Path(__file__).resolve().parent
+    except NameError:
+        # 3. Fallback for local Jupyter Notebooks
+        return Path.cwd().resolve()
+
+
+PROJECT_ROOT = get_project_root()
+VIDEO_DIR = PROJECT_ROOT / "videos"
+LOG_DIR = PROJECT_ROOT / "logs"
+MODEL_DIR = PROJECT_ROOT / "models"
 
 
 # Define options for validating CLI arguments
@@ -94,7 +112,7 @@ gym.register(
 )
 
 
-def make_env(config: dict) -> gym.Env:
+def make_env(config: Dict[str, Any]) -> gym.Env:
     # Initialise the car physics model from the selected option
     car_model_cls = CAR_MODELS[config["car_model"]]
     car_model = car_model_cls()
@@ -125,12 +143,35 @@ def make_env(config: dict) -> gym.Env:
     )
 
 
+class VideoLoggerCallback(WandbCallback):
+    def __init__(
+        self,
+        video_path: Path,
+        config: Dict[str, Any],
+        *args: Any,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(*args, **kwargs)
+        self.video_path = Path(video_path)
+        self.video_log_freq: int = int(config.get("video_save_freq", 1000))
+
+    def _on_step(self) -> bool:  # type: ignore[override]
+        # Check every X steps (matches record_video_trigger frequency)
+        if self.video_log_freq > 0 and self.n_calls % self.video_log_freq == 0:
+            files = list(self.video_path.glob("*.mp4"))
+            if files:
+                latest_video = max(files, key=os.path.getmtime)
+                wandb.log({"test_eval/video": wandb.Video(str(latest_video))})
+        return True
+
+
 def main(
     # Training parameters
-    total_timesteps: int = 100,
-    model_save_freq: int = 99,
-    gradient_save_freq: int = 49,
-    video_save_freq: int = 49,
+    total_timesteps: int = 10_000,
+    model_save_freq: int = 2_000,
+    gradient_save_freq: int = 500,
+    video_save_freq: int = 1_000,
+    video_length: int = 300,
     # Environment parameters
     num_processes: int = 4,
     track: TrackOption = TrackOption.MexicoCity,
@@ -157,7 +198,7 @@ def main(
         "model_save_freq": model_save_freq,
         "gradient_save_freq": gradient_save_freq,
         "video_save_freq": video_save_freq,
-        # Environment parameters
+        "video_length": video_length,
         "num_processes": num_processes,
         "track_csv_path": track_csv_path,
         "num_rangefinders": num_rangefinders,
@@ -192,25 +233,29 @@ def main(
     NUM_PROCESSES = config["num_processes"]
     vec_env = SubprocVecEnv([lambda: make_env(config) for _ in range(NUM_PROCESSES)])
 
-    # Normalize observations and rewards for stable training
-    vec_env = VecNormalize(vec_env, norm_obs=True, norm_reward=True)
-
     # Monitor the environment to log episode rewards and lengths
     vec_env = VecMonitor(vec_env)
 
+    # Normalize observations and rewards for stable training
+    vec_env = VecNormalize(vec_env, norm_obs=True, norm_reward=True)
+
     vec_env = VecVideoRecorder(
         vec_env,
-        video_folder=VIDEO_DIR,
+        video_folder=str(VIDEO_DIR),
         record_video_trigger=lambda x: x % config["video_save_freq"] == 0,
-        video_length=200,
+        video_length=config["video_length"],
         name_prefix="ppo_lts_agent",
     )
 
     # Define the agent
-    agent = PPO("MultiInputPolicy", vec_env, verbose=1, tensorboard_log=f"runs/{run.id}")
+    agent = PPO(
+        "MultiInputPolicy", vec_env, verbose=1, n_steps=256, tensorboard_log=f"runs/{run.id}"
+    )
     agent.learn(
         total_timesteps=config["total_timesteps"],
-        callback=WandbCallback(
+        callback=VideoLoggerCallback(
+            video_path=VIDEO_DIR,
+            config=config,
             verbose=0,
             model_save_path=f"models/{run.id}",
             model_save_freq=config["model_save_freq"],
@@ -220,13 +265,20 @@ def main(
 
     print("Training complete")
 
+    # Save model locally
+    final_model_path = MODEL_DIR / "ppo_lts_final_model"
+    vec_normalize_path = MODEL_DIR / "vec_normalize.pkl"
+
+    agent.save(final_model_path)
+    vec_env.save(vec_normalize_path)
+
+    # Sync to W&B
+    wandb.save(vec_normalize_path)
+    wandb.save(final_model_path.with_suffix(".zip"))
+
+    # Clean up
     vec_env.close()
-    wandb.finish()
-
-    # agent.save("ppo_lts_agent")
-
-    # Required for correct evaluation
-    # vec_env.save("vec_normalize.pkl")
+    run.finish()
 
 
 if __name__ == "__main__":
