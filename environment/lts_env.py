@@ -458,14 +458,12 @@ class LtsEnv(gym.Env):
         parallel_velocity = speed * obs["kinematic_state"][4]  # cos(angle_to_track)
         reward += self._rcs.parallel_velocity * parallel_velocity
 
-        # Reward survival
-        if self._state.velocity[0] < 0.1:
-            reward += self._rcs.survival
-
-        # Penalise collisions
+        # Penalise collisions and reward survival
         if is_colliding:
             reward += self._rcs.collision
-
+        else:
+            reward += self._rcs.survival
+        
         return reward
 
     def step(self, action: NDArray):

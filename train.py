@@ -161,7 +161,7 @@ class VideoLoggerCallback(WandbCallback):
             files = list(self.video_path.glob("*.mp4"))
             if files:
                 latest_video = max(files, key=os.path.getmtime)
-                wandb.log({"test_eval/video": wandb.Video(str(latest_video))})
+                wandb.log({"video": wandb.Video(str(latest_video), format="mp4")})
         return True
 
 
@@ -180,8 +180,8 @@ def main(
     # Reward coefficients (flattened)
     reward_progress: float = 5.0,
     reward_parallel_velocity: float = 0.1,
-    reward_survival: float = 0.2,
-    reward_collision: float = -200.0,
+    reward_survival: float = 0.0,
+    reward_collision: float = -15.0,
     # Reset options (flattened)
     reset_randomise_start: bool = RESET_OPTIONS.randomise_start,
     reset_randomise_track: bool = RESET_OPTIONS.randomise_track,
@@ -273,8 +273,8 @@ def main(
     vec_env.save(vec_normalize_path)
 
     # Sync to W&B
-    wandb.save(vec_normalize_path)
-    wandb.save(final_model_path.with_suffix(".zip"))
+    wandb.save(vec_normalize_path, base_path=str(MODEL_DIR))
+    wandb.save(final_model_path.with_suffix(".zip"), base_path=str(MODEL_DIR))
 
     # Clean up
     vec_env.close()
