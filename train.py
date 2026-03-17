@@ -220,7 +220,7 @@ def main(
         name="PPO Training Run",
         config=config,
         sync_tensorboard=True,
-        monitor_gym=True,
+        monitor_gym=False,  # We will log videos manually via the callback
         save_code=True,
     )
 
@@ -233,12 +233,7 @@ def main(
     NUM_PROCESSES = config["num_processes"]
     vec_env = SubprocVecEnv([lambda: make_env(config) for _ in range(NUM_PROCESSES)])
 
-    # Monitor the environment to log episode rewards and lengths
-    vec_env = VecMonitor(vec_env)
-
-    # Normalize observations and rewards for stable training
-    vec_env = VecNormalize(vec_env, norm_obs=True, norm_reward=True)
-
+    # Save videos locally
     vec_env = VecVideoRecorder(
         vec_env,
         video_folder=str(VIDEO_DIR),
@@ -246,6 +241,14 @@ def main(
         video_length=config["video_length"],
         name_prefix="ppo_lts_agent",
     )
+    
+    # Monitor the environment to log episode rewards and lengths
+    vec_env = VecMonitor(vec_env)
+   
+    # Normalize observations and rewards for stable training
+    vec_env = VecNormalize(vec_env, norm_obs=True, norm_reward=True)
+
+    
 
     # Define the agent
     agent = PPO(
@@ -270,7 +273,7 @@ def main(
     vec_normalize_path = MODEL_DIR / "vec_normalize.pkl"
 
     agent.save(final_model_path)
-    vec_env.save(vec_normalize_path)
+    vec_env.save(str(vec_normalize_path))
 
     # Sync to W&B
     wandb.save(vec_normalize_path, base_path=str(MODEL_DIR))
