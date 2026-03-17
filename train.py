@@ -132,7 +132,7 @@ def make_env(config: Dict[str, Any]) -> gym.Env:
     # Create the training environment
     return gym.make(
         "LTS-v0",
-        render_mode="rgb_array",
+        render_mode=config["render_mode"],
         track_csv_path=config["track_csv_path"],
         num_rangefinders=config["num_rangefinders"],
         num_future_curvatures=config["num_future_curvatures"],
@@ -177,6 +177,7 @@ def main(
     track: TrackOption = TrackOption.MexicoCity,
     num_rangefinders: int = NUM_RANGEFINDERS,
     num_future_curvatures: int = NUM_FUTURE_CURVATURES,
+    render_mode: str | None = None,
     # Reward coefficients (flattened)
     reward_progress: float = 5.0,
     reward_parallel_velocity: float = 0.1,
@@ -199,9 +200,11 @@ def main(
         "gradient_save_freq": gradient_save_freq,
         "video_save_freq": video_save_freq,
         "video_length": video_length,
+        # Environment parameters
         "num_processes": num_processes,
         "track_csv_path": track_csv_path,
         "num_rangefinders": num_rangefinders,
+        "render_mode": render_mode,
         "num_future_curvatures": num_future_curvatures,
         # Reward coefficients (flattened)
         "reward_progress": reward_progress,
