@@ -154,8 +154,12 @@ class VideoLoggerCallback(WandbCallback):
         super().__init__(*args, **kwargs)
         self.video_path = Path(video_path)
         self.video_log_freq: int = int(config.get("video_save_freq", 1000))
+        self.render_mode: str | None = config["render_mode"]
 
     def _on_step(self) -> bool:  # type: ignore[override]
+        if self.render_mode != "rgb_array":
+            return True  # Skip video logging if not using rgb_array rendering
+
         # Check every X steps (matches record_video_trigger frequency)
         if self.video_log_freq > 0 and self.n_calls % self.video_log_freq == 0:
             files = list(self.video_path.glob("*.mp4"))
@@ -232,26 +236,33 @@ def main(
         os.makedirs(directory, exist_ok=True)
 
     print("Starting training...")
+    if render_mode == "rgb_array":
+        print(
+            "Video recording enabled. Videos will be saved every "
+            f"{video_save_freq} steps and logged to W&B."
+        )
+    else:
+        print("Video recording disabled. To enable, set --render-mode to 'rgb_array'.")
+
     # Initialise the parallel environment
     NUM_PROCESSES = config["num_processes"]
     vec_env = SubprocVecEnv([lambda: make_env(config) for _ in range(NUM_PROCESSES)])
 
-    # Save videos locally
-    vec_env = VecVideoRecorder(
-        vec_env,
-        video_folder=str(VIDEO_DIR),
-        record_video_trigger=lambda x: x % config["video_save_freq"] == 0,
-        video_length=config["video_length"],
-        name_prefix="ppo_lts_agent",
-    )
-    
+    # Save videos locally only when the environment supports rgb_array rendering
+    if config["render_mode"] == "rgb_array":
+        vec_env = VecVideoRecorder(
+            vec_env,
+            video_folder=str(VIDEO_DIR),
+            record_video_trigger=lambda x: x % config["video_save_freq"] == 0,
+            video_length=config["video_length"],
+            name_prefix="ppo_lts_agent",
+        )
+
     # Monitor the environment to log episode rewards and lengths
     vec_env = VecMonitor(vec_env)
-   
+
     # Normalize observations and rewards for stable training
     vec_env = VecNormalize(vec_env, norm_obs=True, norm_reward=True)
-
-    
 
     # Define the agent
     agent = PPO(
