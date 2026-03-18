@@ -1,39 +1,50 @@
-import gymnasium as gym
+import typer
 from stable_baselines3 import PPO
 from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
 
-from train import NUM_RANGEFINDERS, RESET_OPTIONS, TRACK_CSV_PATH, NUM_FUTURE_CURVATURES, car_model
+import wandb
+from train import make_env
 
-def make_env() -> gym.Env:
-    # Create the evaluation environment
-    return gym.make(
-        "LTS-v0",
-        render_mode="human",
-        track_csv_path=TRACK_CSV_PATH,
-        num_rangefinders=NUM_RANGEFINDERS,
-        num_future_curvatures=NUM_FUTURE_CURVATURES,
-        car_model=car_model,
-        follow_car=False,
-        reset_options=RESET_OPTIONS,
+
+def main(run_id: str, render_mode: str | None = None, follow_car: bool = False):
+    # Initialise the WandB API
+    wandb_api = wandb.Api()
+    run = wandb_api.run(f"default-ducky/LTS/{run_id}")
+
+    # Load the model weights and configuration from the WandB run
+    model_path = (
+        run.file("ppo_lts_final_model.zip").download(root=f"./models/{run_id}", replace=True).name
     )
+    vec_norm_path = (
+        run.file("vec_normalize.pkl").download(root=f"./models/{run_id}", replace=True).name
+    )
+    config = run.config
 
-# Create a dummy vectorized environment
-env_eval = DummyVecEnv([make_env])
+    # Override the the training run's render settings for evaluation
+    config["render_mode"] = render_mode
+    config["follow_car"] = follow_car
 
-# Load the VecNormalize statistics and weights of the trained agent
-env_eval = VecNormalize.load("vec_normalize.pkl", env_eval)
-env_eval.training = False
-env_eval.norm_reward = False
+    # Create a dummy vectorized environment
+    env_eval = DummyVecEnv([lambda: make_env(config)])
 
-agent = PPO.load("ppo_lts_agent", env=env_eval)
+    # Load the VecNormalize statistics and weights of the trained agent
+    env_eval = VecNormalize.load(vec_norm_path, env_eval)
+    env_eval.training = False
+    env_eval.norm_reward = False
+    agent = PPO.load(model_path, env=env_eval)
 
-# Run the trained agent
-obs = env_eval.reset()
+    # Run the trained agent
+    print("Running the trained agent...")
+    obs = env_eval.reset()
 
-while True:
-    action, _ = agent.predict(obs, deterministic=True) # type: ignore
-    obs, reward, done, info = env_eval.step(action)
-    print(info)
+    while True:
+        action, _ = agent.predict(obs, deterministic=True)  # type: ignore
+        obs, reward, done, info = env_eval.step(action)
+        print(info)
 
-    if done:
-        obs = env_eval.reset()
+        if done:
+            obs = env_eval.reset()
+
+
+if __name__ == "__main__":
+    typer.run(main)

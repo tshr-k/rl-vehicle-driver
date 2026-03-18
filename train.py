@@ -129,16 +129,18 @@ def make_env(config: Dict[str, Any]) -> gym.Env:
         randomise_track=config["reset_randomise_track"],
     )
 
+    track_csv_path = str(TRACKS_DIR / config["track_name"])
+
     # Create the training environment
     return gym.make(
         "LTS-v0",
         render_mode=config["render_mode"],
-        track_csv_path=config["track_csv_path"],
+        track_csv_path=track_csv_path,
         num_rangefinders=config["num_rangefinders"],
         num_future_curvatures=config["num_future_curvatures"],
         reward_coefficients=reward_coefficients,
         car_model=car_model,
-        follow_car=False,
+        follow_car=config["follow_car"],
         reset_options=reset_options,
     )
 
@@ -153,7 +155,7 @@ class VideoLoggerCallback(WandbCallback):
     ) -> None:
         super().__init__(*args, **kwargs)
         self.video_path = Path(video_path)
-        self.video_log_freq: int = int(config.get("video_save_freq", 1000))
+        self.video_log_freq: int = config["video_save_freq"]
         self.render_mode: str | None = config["render_mode"]
 
     def _on_step(self) -> bool:  # type: ignore[override]
@@ -182,6 +184,7 @@ def main(
     num_rangefinders: int = NUM_RANGEFINDERS,
     num_future_curvatures: int = NUM_FUTURE_CURVATURES,
     render_mode: str | None = None,
+    follow_car: bool = False,
     # Reward coefficients (flattened)
     reward_progress: float = 5.0,
     reward_parallel_velocity: float = 0.1,
@@ -194,7 +197,8 @@ def main(
     car_model: CarModelOption = CarModelOption.kinematic_bicycle,
 ) -> None:
 
-    track_csv_path = str(TRACKS_DIR / track.value)
+    # Store only the track *name* in the config
+    track_name = track.value
 
     # Initialise Weights & Biases for experiment tracking
     config = {
@@ -206,10 +210,11 @@ def main(
         "video_length": video_length,
         # Environment parameters
         "num_processes": num_processes,
-        "track_csv_path": track_csv_path,
+        "track_name": track_name,
         "num_rangefinders": num_rangefinders,
-        "render_mode": render_mode,
         "num_future_curvatures": num_future_curvatures,
+        "render_mode": render_mode,
+        "follow_car": follow_car,
         # Reward coefficients (flattened)
         "reward_progress": reward_progress,
         "reward_parallel_velocity": reward_parallel_velocity,
