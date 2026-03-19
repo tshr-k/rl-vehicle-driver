@@ -171,12 +171,15 @@ class VideoLoggerCallback(WandbCallback):
         for info in infos:
             ep_info = info.get("episode")
             if ep_info is not None:
+                truncated = bool(ep_info.get("TimeLimit.truncated", False))
+                terminated = not truncated
+
                 wandb.log(
                     {
                         "rollout/ep_info_speed": ep_info.get("speed"),
                         "rollout/ep_info_progress": ep_info.get("progress"),
-                        "rollout/ep_info_terminated": ep_info.get("terminated"),
-                        "rollout/ep_info_truncated": ep_info.get("truncated"),
+                        "rollout/ep_info_terminated": float(terminated),
+                        "rollout/ep_info_truncated": float(truncated),
                     },
                     step=self.num_timesteps,
                 )
@@ -304,7 +307,7 @@ def main(
         )
 
     # Monitor the environment to log episode rewards, episode lengths and end-of-episode info
-    vec_env = VecMonitor(vec_env, info_keywords=("speed", "progress", "terminated", "truncated"))
+    vec_env = VecMonitor(vec_env, info_keywords=("speed", "progress", "TimeLimit.truncated",))
 
     # Normalize observations and rewards for stable training
     vec_env = VecNormalize(vec_env, norm_obs=True, norm_reward=True)

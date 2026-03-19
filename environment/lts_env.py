@@ -398,12 +398,10 @@ class LtsEnv(gym.Env):
             future_curvatures=future_curvatures.astype(np.float32),
         )
 
-    def _get_info(self, terminated: bool, truncated: bool) -> Dict:
+    def _get_info(self) -> Dict:
         return {
             "speed": vec_norm(self._state.velocity),
-            "progress": self._progress,
-            "terminated": terminated,  # Since SB3 only has a "done" signal
-            "truncated": truncated
+            "progress": self._progress
         }
 
     def reset(
@@ -441,7 +439,7 @@ class LtsEnv(gym.Env):
         )
 
         observation = self._get_obs()
-        info = self._get_info(terminated=False, truncated=False)
+        info = self._get_info()
         return observation, info
 
     def _calculate_reward(self, action: NDArray, obs: _LtsObservation, is_colliding: bool) -> float:
@@ -498,6 +496,4 @@ class LtsEnv(gym.Env):
         # No explicit truncation here, but a wrapper could be used externally if desired
         truncated = False
 
-        info = self._get_info(terminated, truncated)
-
-        return obs, reward, terminated, truncated, info
+        return obs, reward, terminated, truncated, self._get_info()
