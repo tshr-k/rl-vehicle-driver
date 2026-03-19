@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any, Dict
 
 import typer
+from stable_baselines3.common.callbacks import BaseCallback
 
 # Suppress gym, TensorFlow and gRPC warnings for cleaner output
 os.environ["GYM_IGNORE_WARNINGS"] = "1"
@@ -165,10 +166,24 @@ class VideoLoggerCallback(WandbCallback):
         self.render_mode: str | None = config["render_mode"]
 
     def _on_step(self) -> bool:  # type: ignore[override]
-        if self.render_mode != "rgb_array":
-            return True  # Skip video logging if not using rgb_array rendering
+        # Log episode info to wandb
+        infos = self.locals.get("infos", [])
+        for info in infos:
+            ep_info = info.get("episode")
+            if ep_info is not None:
+                wandb.log(
+                    {
+                        "rollout/ep_info_speed": ep_info.get("speed"),
+                        "rollout/ep_info_progress": ep_info.get("progress"),
+                        "rollout/ep_info_terminated": ep_info.get("terminated"),
+                        "rollout/ep_info_truncated": ep_info.get("truncated"),
+                    },
+                    step=self.num_timesteps,
+                )
 
-        # Check every X steps (matches record_video_trigger frequency)
+        # Video logging
+        if self.render_mode != "rgb_array":
+            return True
         if self.video_log_freq > 0 and self.n_calls % self.video_log_freq == 0:
             files = list(self.video_path.glob("*.mp4"))
             if files:
