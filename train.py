@@ -21,6 +21,7 @@ if (platform.system() == "Linux") and (not os.environ.get("DISPLAY")):
 
 
 import gymnasium as gym
+from gymnasium.wrappers import TimeLimit
 from stable_baselines3 import PPO
 from stable_baselines3.common.vec_env import (
     SubprocVecEnv,
@@ -132,7 +133,7 @@ def make_env(config: Dict[str, Any]) -> gym.Env:
     track_csv_path = str(TRACKS_DIR / config["track_name"])
 
     # Create the training environment
-    return gym.make(
+    env = gym.make(
         "LTS-v0",
         render_mode=config["render_mode"],
         track_csv_path=track_csv_path,
@@ -143,6 +144,11 @@ def make_env(config: Dict[str, Any]) -> gym.Env:
         follow_car=config["follow_car"],
         reset_options=reset_options,
     )
+
+    # Enforce maximum episode length
+    env = TimeLimit(env, max_episode_steps=config["max_episode_steps"])
+
+    return env
 
 
 class VideoLoggerCallback(WandbCallback):
@@ -170,6 +176,23 @@ class VideoLoggerCallback(WandbCallback):
                 wandb.log({"video": wandb.Video(str(latest_video), format="mp4")})
         return True
 
+    def _on_training_end(self) -> None:  # Triggered even by KeyboardInterrupt
+        # Save model locally
+        final_model_path = MODEL_DIR / "ppo_lts_final_model"
+        vec_normalize_path = MODEL_DIR / "vec_normalize.pkl"
+
+        self.model.save(final_model_path)
+        self.training_env: VecNormalize
+        self.training_env.save(str(vec_normalize_path))
+
+        # Sync to W&B
+        wandb.save(vec_normalize_path, base_path=str(MODEL_DIR))
+        wandb.save(final_model_path.with_suffix(".zip"), base_path=str(MODEL_DIR))
+
+        # Clean up
+        self.training_env.close()
+        wandb.finish()
+
 
 def main(
     # Training parameters
@@ -179,6 +202,7 @@ def main(
     video_save_freq: int = 1_000,
     video_length: int = 300,
     # Environment parameters
+    max_episode_steps: int = 1_000,
     num_processes: int = 4,
     track: TrackOption = TrackOption.MexicoCity,
     num_rangefinders: int = NUM_RANGEFINDERS,
@@ -189,7 +213,7 @@ def main(
     reward_progress: float = 5.0,
     reward_parallel_velocity: float = 0.1,
     reward_survival: float = 0.0,
-    reward_collision: float = -15.0,
+    reward_collision: float = -20.0,
     # Reset options (flattened)
     reset_randomise_start: bool = RESET_OPTIONS.randomise_start,
     reset_randomise_track: bool = RESET_OPTIONS.randomise_track,
@@ -209,6 +233,7 @@ def main(
         "video_save_freq": video_save_freq,
         "video_length": video_length,
         # Environment parameters
+        "max_episode_steps": max_episode_steps,
         "num_processes": num_processes,
         "track_name": track_name,
         "num_rangefinders": num_rangefinders,
@@ -263,8 +288,8 @@ def main(
             name_prefix="ppo_lts_agent",
         )
 
-    # Monitor the environment to log episode rewards and lengths
-    vec_env = VecMonitor(vec_env)
+    # Monitor the environment to log episode rewards, episode lengths and end-of-episode info
+    vec_env = VecMonitor(vec_env, info_keywords=("speed", "progress", "terminated", "truncated"))
 
     # Normalize observations and rewards for stable training
     vec_env = VecNormalize(vec_env, norm_obs=True, norm_reward=True)
@@ -287,20 +312,7 @@ def main(
 
     print("Training complete")
 
-    # Save model locally
-    final_model_path = MODEL_DIR / "ppo_lts_final_model"
-    vec_normalize_path = MODEL_DIR / "vec_normalize.pkl"
-
-    agent.save(final_model_path)
-    vec_env.save(str(vec_normalize_path))
-
-    # Sync to W&B
-    wandb.save(vec_normalize_path, base_path=str(MODEL_DIR))
-    wandb.save(final_model_path.with_suffix(".zip"), base_path=str(MODEL_DIR))
-
-    # Clean up
-    vec_env.close()
-    run.finish()
+    # Clean up happens in the callback's _on_training_end method
 
 
 if __name__ == "__main__":

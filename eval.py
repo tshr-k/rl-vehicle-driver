@@ -28,6 +28,7 @@ def main(run_id: str, render_mode: str | None = None, follow_car: bool = False):
     env_eval = DummyVecEnv([lambda: make_env(config)])
 
     # Load the VecNormalize statistics and weights of the trained agent
+    print("Loading the trained agent...")
     env_eval = VecNormalize.load(vec_norm_path, env_eval)
     env_eval.training = False
     env_eval.norm_reward = False
@@ -38,7 +39,7 @@ def main(run_id: str, render_mode: str | None = None, follow_car: bool = False):
     obs = env_eval.reset()
 
     while True:
-        action, _ = agent.predict(obs, deterministic=True)  # type: ignore
+        action, _ = agent.predict(obs, deterministic=False)  # type: ignore
         obs, reward, done, info = env_eval.step(action)
         print(info)
 
