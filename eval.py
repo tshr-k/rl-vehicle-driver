@@ -1,15 +1,20 @@
+import os
+
 import typer
+from dotenv import load_dotenv
 from stable_baselines3 import PPO
 from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
 
 import wandb
 from train import make_env
 
+load_dotenv()
+
 
 def main(run_id: str, render_mode: str | None = None, follow_car: bool = False):
     # Initialise the WandB API
     wandb_api = wandb.Api()
-    run = wandb_api.run(f"default-ducky/LTS/{run_id}")
+    run = wandb_api.run(f"{os.environ['WANDB_USERNAME']}/LTS/{run_id}")
 
     # Load the model weights and configuration from the WandB run
     model_path = (
