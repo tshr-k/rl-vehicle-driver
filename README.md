@@ -1,19 +1,10 @@
-# RL Lap Time Simulator
+# RL Vehicle Driver
 
-A reinforcement learning project where PPO agents learn to drive fast laps around real-world race tracks using only first-person observations (like a human driver). I built it from scratch with Gymnasium and Stable-Baselines3 to explore environment design, reward engineering and policy optimisation.
+A reinforcement learning project where an agent given only first-person observations learns to drive around a 2D racetrack environment. I built it from scratch (including vehicle dynamics) with Gymnasium and Stable-Baselines3 to explore environment design, reward engineering and reinforcement learning algorithms.
 
-## Features
+## Try it out
 
-- PPO agents trained in parallel across multiple processes with observation and reward normalisation
-- Multi-input policy over a dictionary observation of local kinematics, rangefinder rays to the track boundaries and upcoming track curvature
-- Continuous `[throttle, steering]` action space
-- Configurable reward shaping for track progress, velocity along the track, survival and collisions
-- Randomised start positions and episode time limits for more varied training experience
-- Experiment tracking, model checkpoints and episode videos logged to Weights & Biases
-- Custom Gymnasium environment covering 25 real-world circuits, with a kinematic bicycle car model including drag, downforce and tyre grip limits
-- Pygame rendering, with a manual driving mode for testing the environment yourself
-
-## Setup
+### Setup
 
 Requires Python 3.11+ and a [Weights & Biases](https://wandb.ai) account.
 
@@ -28,9 +19,9 @@ To evaluate runs, create a `.env` file in the project root containing your W&B u
 WANDB_USERNAME=your-username
 ```
 
-## Running
+### Running
 
-### Driving manually
+#### Driving manually
 
 ```sh
 python play.py
@@ -38,7 +29,7 @@ python play.py
 
 Use the arrow keys to accelerate and steer, and space to brake.
 
-### Training
+#### Training
 
 ```sh
 python train.py --total-timesteps 1000000 --track Monza.csv
@@ -46,7 +37,7 @@ python train.py --total-timesteps 1000000 --track Monza.csv
 
 Training hyperparameters, environment settings, reward coefficients and the track are all configurable from the command line. Run `python train.py --help` to see every option. Pass `--render-mode rgb_array` to record episode videos and log them to W&B.
 
-### Evaluating
+#### Evaluating
 
 ```sh
 python eval.py <wandb-run-id> --render-mode human
@@ -56,4 +47,4 @@ This downloads the trained model and normalisation statistics from the given W&B
 
 ## Acknowledgements
 
-Track data is from the [TUMFTM racetrack database](https://github.com/TUMFTM/racetrack-database).
+Track data is from the [TUMFTM racetrack database](https://github.com/TUMFTM/racetrack-database). The choice of observations given to the agent is inspired by [a Sony paper](https://ieeexplore.ieee.org/abstract/document/9372847).
